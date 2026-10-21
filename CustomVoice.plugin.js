@@ -1,7 +1,7 @@
 /**
  * @name CustomVoice
  * @author CustomVoice contributors
- * @version 1.0.29
+ * @version 1.0.30
  * @description Independent LiveKit voice channels inside Discord.
  * @source https://github.com/poco00705/CustomVoice-plugin
  * @updateUrl https://raw.githubusercontent.com/poco00705/CustomVoice-plugin/main/CustomVoice.plugin.js
@@ -32488,6 +32488,7 @@ function sessionPersistence(data) {
 // src/stores/store.ts
 var DEFAULT_BACKEND_URL = "https://voice.222.121.56.92.sslip.io";
 var defaults = {
+  shareAudioDefaultsVersion: 1,
   serverDefaultsVersion: 1,
   backendUrl: DEFAULT_BACKEND_URL,
   websocketUrl: "",
@@ -32630,6 +32631,9 @@ function loadSettings(value) {
   for (const key of Object.keys(defaults))
     if (typeof data[key] === typeof defaults[key])
       result[key] = data[key];
+  if (data.shareAudioDefaultsVersion !== defaults.shareAudioDefaultsVersion)
+    result.shareAudio = true;
+  result.shareAudioDefaultsVersion = defaults.shareAudioDefaultsVersion;
   result.backendUrl = result.backendUrl.trim() || DEFAULT_BACKEND_URL;
   result.websocketUrl = result.websocketUrl.trim();
   if (data.serverDefaultsVersion === void 0 && /^http:\/\/localhost:3000\/?$/.test(result.backendUrl) && !result.websocketUrl)
@@ -55199,7 +55203,7 @@ function createServerSetup(manager, compat) {
 }
 
 // package.json
-var version3 = "1.0.29";
+var version3 = "1.0.30";
 
 // src/components/settings.ts
 function createSettingsPanel(manager, compat) {
