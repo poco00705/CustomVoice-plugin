@@ -1,6 +1,6 @@
 # CustomVoice
 
-BetterDiscord에서 기존 CustomVoice 백엔드의 음성 채널과 화면 공유를 이용하는 플러그인입니다. 현재 버전: **1.0.31**.
+BetterDiscord에서 기존 CustomVoice 백엔드의 음성 채널과 화면 공유를 이용하는 플러그인입니다. 현재 버전: **1.0.32**.
 
 ## 설치
 
@@ -17,3 +17,7 @@ BetterDiscord에서 기존 CustomVoice 백엔드의 음성 채널과 화면 공�
 ## 새 버전 배포
 
 개발 프로젝트에서 버전을 올리고 타입 검사·회귀 검사·빌드를 완료한 후 dist/CustomVoice.plugin.js를 이 저장소 main의 CustomVoice.plugin.js로 교체하세요. 이 저장소는 배포 파일만 포함하며 사용자 설정·세션·인증 정보는 업로드하지 않습니다.
+
+## 1.0.32 서버 이전
+
+기본 주소는 `https://mcv.modaweb.kr`입니다. 기존 `voice.222.121.56.92.sslip.io`와 `voice.125.132.41.195.sslip.io`를 쓰던 설정·기본 WebSocket 주소·저장 로그인 연결 정보를 업데이트 후 자동 전환합니다. 사용자 지정 서버 주소는 유지합니다. 서버 이전 과정에서 세션이 만료·삭제되었다면 재로그인이 필요할 수 있습니다.
