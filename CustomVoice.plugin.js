@@ -1,7 +1,7 @@
 /**
  * @name CustomVoice
  * @author CustomVoice contributors
- * @version 1.0.30
+ * @version 1.0.31
  * @description Independent LiveKit voice channels inside Discord.
  * @source https://github.com/poco00705/CustomVoice-plugin
  * @updateUrl https://raw.githubusercontent.com/poco00705/CustomVoice-plugin/main/CustomVoice.plugin.js
@@ -32486,7 +32486,7 @@ function sessionPersistence(data) {
 }
 
 // src/stores/store.ts
-var DEFAULT_BACKEND_URL = "https://voice.222.121.56.92.sslip.io";
+var DEFAULT_BACKEND_URL = "https://voice.125.132.41.195.sslip.io";
 var defaults = {
   shareAudioDefaultsVersion: 1,
   serverDefaultsVersion: 1,
