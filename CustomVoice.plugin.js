@@ -1,7 +1,7 @@
 /**
  * @name CustomVoice
  * @author CustomVoice contributors
- * @version 1.0.31
+ * @version 1.0.32
  * @description Independent LiveKit voice channels inside Discord.
  * @source https://github.com/poco00705/CustomVoice-plugin
  * @updateUrl https://raw.githubusercontent.com/poco00705/CustomVoice-plugin/main/CustomVoice.plugin.js
@@ -32453,18 +32453,42 @@ function showDeviceNotice(manager, message, retry) {
   }
 }
 
+// src/services/server-endpoint.ts
+var DEFAULT_BACKEND_URL = "https://mcv.modaweb.kr";
+var LEGACY_HOSTS = /* @__PURE__ */ new Set(["voice.222.121.56.92.sslip.io", "voice.125.132.41.195.sslip.io"]);
+function isLegacyBackend(value) {
+  if (typeof value !== "string") return false;
+  try {
+    const url2 = new URL(value.trim());
+    return url2.protocol === "https:" && LEGACY_HOSTS.has(url2.hostname) && !url2.port && url2.pathname === "/" && !url2.search && !url2.hash && !url2.username && !url2.password;
+  } catch {
+    return false;
+  }
+}
+function migrateLegacyWebSocket(value) {
+  try {
+    const url2 = new URL(value);
+    if (url2.protocol === "wss:" && LEGACY_HOSTS.has(url2.hostname) && !url2.port && !url2.username && !url2.password && url2.pathname === "/api/v1/ws" && !url2.search && !url2.hash)
+      return "wss://mcv.modaweb.kr/api/v1/ws";
+  } catch {
+  }
+  return value;
+}
+
 // src/services/session-storage.ts
 function sessionPersistence(data) {
   return {
     load(backendUrl) {
       const value = data.load("CustomVoice", "session");
-      if (!value || value.version !== 1 || value.backendUrl !== backendUrl)
+      const migrated = backendUrl === DEFAULT_BACKEND_URL && isLegacyBackend(value?.backendUrl);
+      if (!value || value.version !== 1 || value.backendUrl !== backendUrl && !migrated)
         return;
       const c = value.credentials;
       if (!c || !["accessToken", "refreshToken", "sessionId"].every(
         (k) => typeof c[k] === "string" && c[k].length > 0
       ) || typeof c.expiresAt !== "string" || !Number.isFinite(Date.parse(c.expiresAt)))
         return;
+      if (migrated) data.save("CustomVoice", "session", { ...value, backendUrl });
       return {
         accessToken: c.accessToken,
         refreshToken: c.refreshToken,
@@ -32486,10 +32510,9 @@ function sessionPersistence(data) {
 }
 
 // src/stores/store.ts
-var DEFAULT_BACKEND_URL = "https://voice.125.132.41.195.sslip.io";
 var defaults = {
   shareAudioDefaultsVersion: 1,
-  serverDefaultsVersion: 1,
+  serverDefaultsVersion: 2,
   backendUrl: DEFAULT_BACKEND_URL,
   websocketUrl: "",
   inputDevice: "default",
@@ -32636,6 +32659,10 @@ function loadSettings(value) {
   result.shareAudioDefaultsVersion = defaults.shareAudioDefaultsVersion;
   result.backendUrl = result.backendUrl.trim() || DEFAULT_BACKEND_URL;
   result.websocketUrl = result.websocketUrl.trim();
+  if (isLegacyBackend(result.backendUrl)) {
+    result.backendUrl = DEFAULT_BACKEND_URL;
+    result.websocketUrl = migrateLegacyWebSocket(result.websocketUrl);
+  }
   if (data.serverDefaultsVersion === void 0 && /^http:\/\/localhost:3000\/?$/.test(result.backendUrl) && !result.websocketUrl)
     result.backendUrl = DEFAULT_BACKEND_URL;
   result.serverDefaultsVersion = defaults.serverDefaultsVersion;
@@ -55203,7 +55230,7 @@ function createServerSetup(manager, compat) {
 }
 
 // package.json
-var version3 = "1.0.30";
+var version3 = "1.0.32";
 
 // src/components/settings.ts
 function createSettingsPanel(manager, compat) {
@@ -57489,6 +57516,7 @@ var CustomVoice = class {
       store.set({
         settings: loadSettings(BdApi.Data.load("CustomVoice", "settings"))
       });
+      BdApi.Data.save("CustomVoice", "settings", store.get().settings);
       this.manager = new VoiceSessionManager(
         store,
         (s) => BdApi.Data.save("CustomVoice", "settings", s),
