@@ -1,6 +1,6 @@
 # CustomVoice
 
-BetterDiscord에서 기존 CustomVoice 백엔드의 음성 채널과 화면 공유를 이용하는 플러그인입니다. 현재 버전: **1.0.30**.
+BetterDiscord에서 기존 CustomVoice 백엔드의 음성 채널과 화면 공유를 이용하는 플러그인입니다. 현재 버전: **1.0.31**.
 
 ## 설치
 
