@@ -1,7 +1,7 @@
 /**
  * @name CustomVoice
  * @author CustomVoice contributors
- * @version 1.0.32
+ * @version 1.0.33
  * @description Independent LiveKit voice channels inside Discord.
  * @source https://github.com/poco00705/CustomVoice-plugin
  * @updateUrl https://raw.githubusercontent.com/poco00705/CustomVoice-plugin/main/CustomVoice.plugin.js
@@ -32055,6 +32055,7 @@ var ONE_SECOND_IN_MILLISECONDS = 1e3;
 var ONE_MINUTE_IN_MILLISECONDS = 60 * ONE_SECOND_IN_MILLISECONDS;
 
 // src/services/screen-quality.ts
+var fixedDegradationPreference = "maintain-framerate-and-resolution";
 var shareQualities = ["720p", "1080p", "1440p", "source"];
 var shareQualityLabel = (quality) => quality === "source" ? "\uCD9C\uCC98 (\uC6D0\uBCF8 \uD654\uC9C8)" : quality;
 function screenProfile(quality, fps, source) {
@@ -32064,12 +32065,57 @@ function screenProfile(quality, fps, source) {
   const sourceScale = quality === "source" ? Math.max(1, Math.min(4, (width || 3840) * (height || 2160) / (1920 * 1080))) : 1;
   const bitrate = Math.round(base[fps] * sourceScale * 1e6);
   const publish = {
-    simulcast: true,
+    simulcast: false,
+    backupCodec: false,
     screenShareEncoding: { maxFramerate: fps, maxBitrate: bitrate },
-    screenShareSimulcastLayers: [new VideoPreset(Math.floor((width || 3840) / 2), Math.floor((height || 2160) / 2), bitrate / 4, fps)],
-    degradationPreference: "balanced"
+    degradationPreference: fixedDegradationPreference
   };
   return { width, height, fps, bitrate, publish };
+}
+async function fixScreenCapture(capture, quality, fps) {
+  const requested = screenProfile(quality, fps);
+  try {
+    await capture.applyConstraints({
+      ...quality === "source" ? {} : {
+        width: { exact: requested.width },
+        height: { exact: requested.height }
+      },
+      frameRate: { exact: fps }
+    });
+  } catch (error62) {
+    throw new Error("\uC120\uD0DD\uD55C \uC1A1\uCD9C \uD574\uC0C1\uB3C4/FPS\uB85C \uCEA1\uCC98\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uC1A1\uCD9C \uC124\uC815\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", { cause: error62 });
+  }
+  const settings = capture.getSettings();
+  if (!settings.width || !settings.height || !settings.frameRate || Math.abs(settings.frameRate - fps) > 0.5 || quality !== "source" && (settings.width !== requested.width || settings.height !== requested.height)) {
+    throw new Error("\uC120\uD0DD\uD55C \uC1A1\uCD9C \uD574\uC0C1\uB3C4/FPS\uB97C \uCEA1\uCC98 \uC7A5\uCE58\uAC00 \uC801\uC6A9\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC790\uB3D9\uC73C\uB85C \uB0AE\uC740 \uC124\uC815\uC744 \uC0AC\uC6A9\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
+  }
+  if (quality === "source") await capture.applyConstraints({
+    width: { exact: settings.width },
+    height: { exact: settings.height },
+    frameRate: { exact: fps }
+  });
+  capture.contentHint = "motion";
+  return screenProfile(quality, fps, settings);
+}
+async function fixScreenSender(sender, fps, bitrate) {
+  for (let attempt = 0; ; attempt++) {
+    const params = sender.getParameters();
+    if (params.encodings.length !== 1) throw new Error("\uB2E8\uC77C \uD654\uC9C8 \uC778\uCF54\uB354\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4. \uD654\uBA74 \uACF5\uC720\uB97C \uC885\uB8CC\uD55C \uD6C4 \uB2E4\uC2DC \uC2DC\uC791\uD574 \uC8FC\uC138\uC694.");
+    params.degradationPreference = fixedDegradationPreference;
+    Object.assign(params.encodings[0], { scaleResolutionDownBy: 1, maxFramerate: fps, maxBitrate: bitrate });
+    try {
+      await sender.setParameters(params);
+      break;
+    } catch (error62) {
+      if (!attempt && error62.name === "InvalidModificationError") continue;
+      throw new Error("\uACE0\uC815 \uD654\uC9C8/FPS \uC1A1\uCD9C \uC124\uC815\uC744 \uC801\uC6A9\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. Discord\uB97C \uC5C5\uB370\uC774\uD2B8\uD55C \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.", { cause: error62 });
+    }
+  }
+  const applied = sender.getParameters();
+  const encoding = applied.encodings[0];
+  if (applied.degradationPreference !== fixedDegradationPreference || applied.encodings.length !== 1 || encoding?.scaleResolutionDownBy !== 1 || encoding.maxFramerate !== fps || encoding.maxBitrate !== bitrate) {
+    throw new Error("\uACE0\uC815 \uD654\uC9C8/FPS \uC778\uCF54\uB354 \uC124\uC815\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC790\uB3D9 \uD558\uD5A5 \uC124\uC815\uC73C\uB85C \uB300\uCCB4\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
+  }
 }
 
 // src/discord/screen-capture.ts
@@ -32342,9 +32388,12 @@ function discordScreenCapture(pick2 = selectDesktopSource) {
         chromeMediaSource: "desktop",
         chromeMediaSourceId: id2,
         ...options.resolution.width > 0 && options.resolution.height > 0 ? {
+          minWidth: options.resolution.width,
           maxWidth: options.resolution.width,
+          minHeight: options.resolution.height,
           maxHeight: options.resolution.height
         } : {},
+        minFrameRate: options.resolution.frameRate,
         maxFrameRate: options.resolution.frameRate
       }
     };
@@ -32696,7 +32745,7 @@ function isAudioDeviceError(error62) {
 }
 
 // src/vendor/sdk/media-options.ts
-var mediaRoomOptions = { adaptiveStream: false, dynacast: true };
+var mediaRoomOptions = { adaptiveStream: false, dynacast: false };
 
 // src/services/screen-codec.ts
 async function selectScreenCodec(width, height, fps, bitrate) {
@@ -32705,7 +32754,7 @@ async function selectScreenCodec(width, height, fps, bitrate) {
     caps = globalThis.RTCRtpSender?.getCapabilities?.("video");
   } catch {
   }
-  const candidates = ["av1", "h264", "vp9", "vp8"].filter((codec2) => caps?.codecs ? caps.codecs.some((c) => c.mimeType.toLowerCase() === `video/${codec2}`) : codec2 === "h264" || codec2 === "vp8");
+  const candidates = ["h264", "vp8"].filter((codec2) => caps?.codecs ? caps.codecs.some((c) => c.mimeType.toLowerCase() === `video/${codec2}`) : codec2 === "h264" || codec2 === "vp8");
   const supported = new Set(candidates);
   for (const codec2 of candidates) {
     if (!globalThis.navigator?.mediaCapabilities?.encodingInfo) break;
@@ -52959,12 +53008,13 @@ var VoiceClient = class {
     ) : nativeCapture());
     const selectedQuality = captureOptions.quality ?? (captureOptions.resolution.height >= 1440 ? "1440p" : captureOptions.resolution.height >= 1080 ? "1080p" : "720p");
     const selectedFps = [15, 30, 60].includes(captureOptions.resolution.frameRate) ? captureOptions.resolution.frameRate : 30;
-    const sourceSettings = tracks.find((track) => track.kind === Track.Kind.Video)?.mediaStreamTrack.getSettings?.();
-    const profile = screenProfile(selectedQuality, selectedFps, sourceSettings);
-    profile.publish.videoCodec = await selectScreenCodec(sourceSettings?.width ?? profile.width, sourceSettings?.height ?? profile.height, selectedFps, profile.bitrate);
-    if (profile.publish.videoCodec !== "vp8") profile.publish.backupCodec = { codec: "vp8" };
     let authorized = false;
     try {
+      const video = tracks.find((track) => track.kind === Track.Kind.Video);
+      if (!video) throw new Error("\uD654\uBA74 \uCEA1\uCC98\uC5D0\uC11C \uC601\uC0C1 \uD2B8\uB799\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+      const profile = await fixScreenCapture(video.mediaStreamTrack, selectedQuality, selectedFps);
+      const settings = video.mediaStreamTrack.getSettings();
+      profile.publish.videoCodec = await selectScreenCodec(settings.width ?? profile.width, settings.height ?? profile.height, selectedFps, profile.bitrate);
       if (captureAbort.signal.aborted)
         throw new DOMException("Screen capture cancelled", "AbortError");
       if (this.room !== room)
@@ -52980,6 +53030,11 @@ var VoiceClient = class {
         if (captureAbort.signal.aborted || this.room !== room || track.mediaStreamTrack.readyState === "ended")
           throw new Error("Screen capture stopped");
         await room.localParticipant.publishTrack(track, track.kind === Track.Kind.Video ? profile.publish : void 0);
+        if (track.kind === Track.Kind.Video) {
+          const sender = track.sender;
+          if (!sender) throw new Error("\uD654\uBA74 \uC1A1\uCD9C \uC778\uCF54\uB354\uAC00 \uC900\uBE44\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.");
+          await fixScreenSender(sender, selectedFps, profile.bitrate);
+        }
       }
       this.activeShare = { quality: selectedQuality, fps: selectedFps };
     } catch (error62) {
@@ -53046,39 +53101,12 @@ var VoiceClient = class {
       throw new Error("\uD604\uC7AC \uC1A1\uCD9C \uC911\uC778 \uBC29\uC1A1\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
     const capture = track.mediaStreamTrack;
     const oldConstraints = capture.getConstraints();
-    let profile = screenProfile(quality, fps);
     const sender = track.sender;
     const oldParams = sender.getParameters();
     try {
-      await capture.applyConstraints({
-        ...quality === "source" ? {} : { width: { max: profile.width }, height: { max: profile.height } },
-        frameRate: { ideal: fps, max: fps }
-      });
-      profile = screenProfile(quality, fps, capture.getSettings());
+      const profile = await fixScreenCapture(capture, quality, fps);
       if (this.room !== room || capture.readyState === "ended") throw new DOMException("\uBC29\uC1A1\uC774 \uC885\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.", "AbortError");
-      for (let attempt = 0; ; attempt++) {
-        const params = sender.getParameters();
-        if (!params.encodings.length) throw new Error("\uC601\uC0C1 \uC778\uCF54\uB354\uAC00 \uC544\uC9C1 \uC900\uBE44\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.");
-        const settings = capture.getSettings();
-        const baseScale = quality === "source" ? 1 : Math.max(
-          1,
-          (settings.width ?? profile.width) / profile.width,
-          (settings.height ?? profile.height) / profile.height
-        );
-        const oldBase = Math.min(...params.encodings.map((encoding) => encoding.scaleResolutionDownBy ?? 1));
-        for (const encoding of params.encodings) {
-          const scale = (encoding.scaleResolutionDownBy ?? 1) / oldBase;
-          encoding.scaleResolutionDownBy = baseScale * scale;
-          encoding.maxFramerate = fps;
-          encoding.maxBitrate = Math.round(profile.bitrate / (scale * scale));
-        }
-        try {
-          await sender.setParameters(params);
-          break;
-        } catch (error62) {
-          if (attempt || error62.name !== "InvalidModificationError") throw error62;
-        }
-      }
+      await fixScreenSender(sender, fps, profile.bitrate);
       if (this.room !== room || track.mediaStreamTrack.readyState === "ended") throw new DOMException("\uBC29\uC1A1\uC774 \uC885\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.", "AbortError");
       const video = track;
       video.publishOptions = { ...video.publishOptions, ...profile.publish };
@@ -53089,6 +53117,7 @@ var VoiceClient = class {
         await capture.applyConstraints(oldConstraints).catch(() => {
         });
         const rollback = sender.getParameters();
+        rollback.degradationPreference = oldParams.degradationPreference;
         rollback.encodings.forEach((encoding, index) => {
           encoding.maxFramerate = oldParams.encodings[index]?.maxFramerate;
           encoding.maxBitrate = oldParams.encodings[index]?.maxBitrate;
@@ -55230,7 +55259,7 @@ function createServerSetup(manager, compat) {
 }
 
 // package.json
-var version3 = "1.0.32";
+var version3 = "1.0.33";
 
 // src/components/settings.ts
 function createSettingsPanel(manager, compat) {
