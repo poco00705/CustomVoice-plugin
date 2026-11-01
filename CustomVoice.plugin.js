@@ -1,7 +1,7 @@
 /**
  * @name CustomVoice
  * @author CustomVoice contributors
- * @version 1.0.33
+ * @version 1.0.34
  * @description Independent LiveKit voice channels inside Discord.
  * @source https://github.com/poco00705/CustomVoice-plugin
  * @updateUrl https://raw.githubusercontent.com/poco00705/CustomVoice-plugin/main/CustomVoice.plugin.js
@@ -32072,30 +32072,30 @@ function screenProfile(quality, fps, source) {
   };
   return { width, height, fps, bitrate, publish };
 }
+var sourceSizes = /* @__PURE__ */ new WeakMap();
 async function fixScreenCapture(capture, quality, fps) {
+  const initial = capture.getSettings();
+  let source = sourceSizes.get(capture);
+  if (!source) {
+    if (!initial.width || !initial.height) throw new Error("\uC6D0\uBCF8 \uD654\uBA74 \uD06C\uAE30\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+    source = { width: initial.width, height: initial.height };
+    sourceSizes.set(capture, source);
+  }
   const requested = screenProfile(quality, fps);
+  const smaller = quality === "source" || source.width < requested.width || source.height < requested.height;
+  const scale = smaller ? 1 : Math.min(requested.width / source.width, requested.height / source.height);
+  const width = Math.max(1, Math.floor(source.width * scale));
+  const height = Math.max(1, Math.floor(source.height * scale));
   try {
-    await capture.applyConstraints({
-      ...quality === "source" ? {} : {
-        width: { exact: requested.width },
-        height: { exact: requested.height }
-      },
-      frameRate: { exact: fps }
-    });
+    await capture.applyConstraints({ width: { exact: width }, height: { exact: height }, frameRate: { exact: fps } });
   } catch (error62) {
-    throw new Error("\uC120\uD0DD\uD55C \uC1A1\uCD9C \uD574\uC0C1\uB3C4/FPS\uB85C \uCEA1\uCC98\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uC1A1\uCD9C \uC124\uC815\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", { cause: error62 });
+    throw new Error("\uC120\uD0DD\uD55C \uC1A1\uCD9C FPS \uB610\uB294 \uC6D0\uBCF8 \uD654\uBA74 \uD06C\uAE30\uB85C \uCEA1\uCC98\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", { cause: error62 });
   }
   const settings = capture.getSettings();
-  if (!settings.width || !settings.height || !settings.frameRate || Math.abs(settings.frameRate - fps) > 0.5 || quality !== "source" && (settings.width !== requested.width || settings.height !== requested.height)) {
-    throw new Error("\uC120\uD0DD\uD55C \uC1A1\uCD9C \uD574\uC0C1\uB3C4/FPS\uB97C \uCEA1\uCC98 \uC7A5\uCE58\uAC00 \uC801\uC6A9\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC790\uB3D9\uC73C\uB85C \uB0AE\uC740 \uC124\uC815\uC744 \uC0AC\uC6A9\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
-  }
-  if (quality === "source") await capture.applyConstraints({
-    width: { exact: settings.width },
-    height: { exact: settings.height },
-    frameRate: { exact: fps }
-  });
+  if (settings.width !== width || settings.height !== height || !settings.frameRate || Math.abs(settings.frameRate - fps) > 0.5)
+    throw new Error("\uC6D0\uBCF8\uC5D0 \uB9DE\uCD98 \uC1A1\uCD9C \uD574\uC0C1\uB3C4/FPS\uB97C \uCEA1\uCC98 \uC7A5\uCE58\uAC00 \uC801\uC6A9\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
   capture.contentHint = "motion";
-  return screenProfile(quality, fps, settings);
+  return { ...screenProfile(quality, fps, source), width, height };
 }
 async function fixScreenSender(sender, fps, bitrate) {
   for (let attempt = 0; ; attempt++) {
@@ -32387,13 +32387,8 @@ function discordScreenCapture(pick2 = selectDesktopSource) {
       mandatory: {
         chromeMediaSource: "desktop",
         chromeMediaSourceId: id2,
-        ...options.resolution.width > 0 && options.resolution.height > 0 ? {
-          minWidth: options.resolution.width,
-          maxWidth: options.resolution.width,
-          minHeight: options.resolution.height,
-          maxHeight: options.resolution.height
-        } : {},
-        minFrameRate: options.resolution.frameRate,
+        // Acquire the source at its own dimensions first. Output size is
+        // clamped to the source after capture; never require an upscale here.
         maxFrameRate: options.resolution.frameRate
       }
     };
@@ -53902,15 +53897,13 @@ var VoiceSessionManager = class {
     this.guildLoading = guild && this.store.get().signaling ? guild.id : void 0;
     if (changed) this.store.set({ guild, channels: [] });
     if (!guild || !this.store.get().signaling) return;
+    const client = this.client;
     try {
       const [snapshot, members2] = await Promise.all([
-        this.client.subscribe(guild.id),
-        this.client.listMembers(guild.id).catch((e2) => {
-          if (e2 instanceof ApiError && e2.status === 404) return [];
-          throw e2;
-        })
+        client.subscribe(guild.id),
+        this.fetchProfiles(guild.id)
       ]);
-      if (!this.stopped && revision === this.guildRevision) {
+      if (!this.stopped && client === this.client && this.store.get().auth === "authenticated" && revision === this.guildRevision) {
         this.loadedGuild = guild.id;
         this.store.snapshot(guild.id, snapshot);
         this.store.set({
@@ -53923,6 +53916,51 @@ var VoiceSessionManager = class {
     } finally {
       if (revision === this.guildRevision) this.guildLoading = void 0;
     }
+  }
+  profileLoads = /* @__PURE__ */ new Map();
+  profileRetries = /* @__PURE__ */ new Map();
+  profileAttempts = /* @__PURE__ */ new Map();
+  fetchProfiles(guildId) {
+    const client = this.client;
+    const pending = this.profileLoads.get(guildId);
+    if (pending?.client === client) return pending.promise;
+    const promise2 = client.listMembers(guildId).then((members2) => {
+      if (!this.stopped && client === this.client && this.store.get().auth === "authenticated")
+        this.store.set({ profiles: { ...this.store.get().profiles, ...Object.fromEntries(members2.map((m) => [m.id, m])) } });
+      return members2;
+    }).finally(() => {
+      if (this.profileLoads.get(guildId)?.promise === promise2) this.profileLoads.delete(guildId);
+    });
+    this.profileLoads.set(guildId, { client, promise: promise2 });
+    return promise2;
+  }
+  refreshParticipantProfiles(guildId, force = false) {
+    if (this.stopped || this.store.get().auth !== "authenticated") return;
+    const missing = () => this.store.get().participants.some((p) => p.guildId === guildId && !this.store.get().profiles[p.userId]);
+    if (!force && !missing()) return;
+    if (this.profileRetries.has(guildId)) return;
+    const client = this.client;
+    void this.fetchProfiles(guildId).catch(() => {
+    }).finally(() => {
+      if (this.stopped || client !== this.client || this.store.get().auth !== "authenticated") return;
+      if (!missing()) {
+        this.profileAttempts.delete(guildId);
+        return;
+      }
+      const attempts = this.profileAttempts.get(guildId) ?? 0;
+      if (attempts >= 3 || this.profileRetries.has(guildId)) return;
+      this.profileAttempts.set(guildId, attempts + 1);
+      this.profileRetries.set(guildId, setTimeout(() => {
+        this.profileRetries.delete(guildId);
+        this.refreshParticipantProfiles(guildId);
+      }, 1e3 * (attempts + 1)));
+    });
+  }
+  clearProfileRefreshes() {
+    for (const timer of this.profileRetries.values()) clearTimeout(timer);
+    this.profileRetries.clear();
+    this.profileAttempts.clear();
+    this.profileLoads.clear();
   }
   async refreshGuilds() {
     if (this.stopped || this.store.get().auth !== "authenticated")
@@ -54355,6 +54393,7 @@ var VoiceSessionManager = class {
       this.persistence?.clear();
       this.client.disconnect();
       this.unsubscribe?.();
+      this.clearProfileRefreshes();
       this.client = this.createClient();
       this.listen();
       this.verifier = void 0;
@@ -54378,6 +54417,10 @@ var VoiceSessionManager = class {
   async event(e2) {
     if (this.stopped) return;
     this.store.event(e2);
+    if (["VOICE_JOINED", "STATE_RESYNC", "VOICE_PARTICIPANTS_SYNC", "CONNECTION_READY", "CHANNEL_LIST_SYNC", "RECONNECT"].includes(e2.op)) {
+      const guilds = new Set(this.store.get().participants.map((p) => p.guildId));
+      for (const guildId of guilds) this.refreshParticipantProfiles(guildId, e2.op !== "VOICE_JOINED");
+    }
     if ([
       "SCREEN_SHARE_STATE_UPDATE",
       "VOICE_LEFT",
@@ -54545,6 +54588,7 @@ var VoiceSessionManager = class {
     await this.client.moderateMove(userId, channelId);
   }
   async logout() {
+    this.clearProfileRefreshes();
     this.rememberSession = false;
     this.retryRestore = false;
     this.persistence?.clear();
@@ -54554,6 +54598,7 @@ var VoiceSessionManager = class {
     } finally {
       this.client.disconnect();
       this.unsubscribe?.();
+      this.clearProfileRefreshes();
       this.client = this.createClient();
       this.rememberSession = true;
       this.listen();
@@ -54575,6 +54620,7 @@ var VoiceSessionManager = class {
     this.client.cancelScreenCapture();
     if (this.stopped) return;
     this.stopped = true;
+    this.clearProfileRefreshes();
     if (this.selfLeaveTimer) clearTimeout(this.selfLeaveTimer);
     this.selfLeaveTimer = void 0;
     ++this.revision;
@@ -55259,7 +55305,7 @@ function createServerSetup(manager, compat) {
 }
 
 // package.json
-var version3 = "1.0.33";
+var version3 = "1.0.34";
 
 // src/components/settings.ts
 function createSettingsPanel(manager, compat) {
@@ -55823,11 +55869,11 @@ var css = `
 .cv .cv-watch-button:hover{background:var(--brand-560,#4752c4)}
 .cv-screen>.cv-screen-heading{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:linear-gradient(#000b,transparent);color:#fff;z-index:1;font-size:13px;pointer-events:none}
 .cv-screen>.cv-screen-heading>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cv-screen>.cv-screen-toolbar{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:flex-end;padding:12px;background:linear-gradient(transparent,#000b);opacity:0;transition:opacity .15s}
-.cv-screen:hover>.cv-screen-toolbar,.cv-screen:focus-within>.cv-screen-toolbar{opacity:1}
+.cv-screen>.cv-screen-toolbar{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:flex-end;padding:12px;background:linear-gradient(transparent,#000b);opacity:0;pointer-events:none;transition:opacity .15s}
+.cv-screen:hover>.cv-screen-toolbar,.cv-screen.cv-controls-visible>.cv-screen-toolbar,.cv-screen:has(:focus-visible)>.cv-screen-toolbar,.cv-screen:has(dialog[open])>.cv-screen-toolbar{opacity:1;pointer-events:auto}
 .cv-screen-toolbar button{background:#222c;color:#fff;font-size:12px}
 @media(prefers-reduced-motion:reduce){.cv-screen>.cv-screen-toolbar{transition:none}}
-@media(max-width:600px){.cv-cards{grid-template-columns:1fr}.cv-screen>.cv-screen-toolbar{opacity:1}}
+@media(max-width:600px){.cv-cards{grid-template-columns:1fr}}
 
 .cv-main>footer .cv-controls .cv-disconnect{width:64px;background:var(--status-danger,#f23f43)!important;color:#fff!important}
 .cv-main>footer .cv-controls .cv-disconnect:hover{background:var(--red-500,#da373c)!important}
@@ -55847,8 +55893,8 @@ var css = `
 /* Observed native stream viewer: dark stage, transient controls, independent stream audio. */
 .cv-main.cv-watching{background:#000}.cv-watching>header{display:none}
 .cv-watching .cv-screens{padding:0;gap:8px}.cv-screen{background:#000}
-.cv-screen>.cv-screen-heading{opacity:0;transition:opacity .15s}
-.cv-screen:hover>.cv-screen-heading,.cv-screen:focus-within>.cv-screen-heading{opacity:1}
+.cv-screen>.cv-screen-heading{opacity:0;pointer-events:none;transition:opacity .15s}
+.cv-screen:hover>.cv-screen-heading,.cv-screen.cv-controls-visible>.cv-screen-heading,.cv-screen:has(:focus-visible)>.cv-screen-heading,.cv-screen:has(dialog[open])>.cv-screen-heading{opacity:1;pointer-events:auto}
 .cv-stream-resolution{font-size:12px;color:#dbdee1;background:#292a30;padding:2px 5px;border-radius:4px}
 .cv-screen>.cv-stream-status{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;background:#0009;color:#dbdee1;font-size:14px;pointer-events:none;text-align:center}
 .cv-stream-status button{pointer-events:auto;background:var(--brand-500,#5865f2);color:#fff}
@@ -55860,14 +55906,14 @@ var css = `
 .cv-stream-volume:focus-within{display:block}.cv-screen-toolbar .cv-stop-watching{color:#fff;background:var(--status-danger,#f23f43)}
 .cv-screen:fullscreen{width:100%;height:100%;border-radius:0;display:block;background:#000}.cv-screen:fullscreen video{width:100%;height:100%;max-height:none;aspect-ratio:auto}
 .cv .cv-view-participants{align-self:center;flex:none;display:flex;align-items:center;gap:6px;background:#232428;color:#dbdee1;border-radius:16px;padding:6px 12px;margin:6px;font-size:12px}
-[data-custom-voice="mini"].cv-overlay{inset:60px 16px auto auto;width:260px;max-width:calc(100% - 32px);height:auto;overflow:hidden;background:#000;border-radius:8px;box-shadow:0 4px 16px #0008}
+[data-custom-voice="mini"].cv-overlay{inset:60px 16px auto auto;width:260px;max-width:calc(100% - 32px);height:auto;max-height:65vh;overflow:auto;background:#000;border-radius:8px;box-shadow:0 4px 16px #0008}
 .cv-mini-player .cv-screen{aspect-ratio:16/9;min-height:0}.cv-mini-player video{height:100%;max-height:none;aspect-ratio:auto}
-.cv-screen-compact>.cv-screen-heading{opacity:1;padding:8px;font-size:11px}.cv-mini-return{pointer-events:auto;background:transparent!important;padding:0!important;font-size:12px!important;color:#fff!important;max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-screen-compact>.cv-screen-heading{padding:8px;font-size:11px}.cv-mini-return{pointer-events:inherit;background:transparent!important;padding:0!important;font-size:12px!important;color:#fff!important;max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cv-screen-compact>.cv-screen-toolbar{padding:8px}.cv-screen-compact .cv-stop-watching{font-size:11px;padding:4px 8px}
 .cv-screen-compact>.cv-stream-status{font-size:12px;padding:32px 12px}
 @media(prefers-reduced-motion:reduce){.cv-screen>.cv-screen-heading{transition:none}}
-@media(max-width:600px){.cv-stream-volume{width:140px}.cv-screen-toolbar button{font-size:11px}.cv-screen>.cv-screen-heading{opacity:1}}
-.cv-stream-heading-actions{display:flex;align-items:center;gap:4px;flex:none}.cv-stream-heading-actions .cv-stream-back{pointer-events:auto;padding:2px;background:transparent;color:#fff;display:flex}
+@media(max-width:600px){.cv-stream-volume{width:140px}.cv-screen-toolbar button{font-size:11px}}
+.cv-stream-heading-actions{display:flex;align-items:center;gap:4px;flex:none}.cv-stream-heading-actions .cv-stream-back{pointer-events:inherit;padding:2px;background:transparent;color:#fff;display:flex}
 .cv-profile-slot> :not([data-custom-voice]){visibility:hidden!important;pointer-events:none!important}
 .cv-profile-slot>[data-custom-voice].cv-overlay{inset:0;overflow:visible;background:var(--background-modifier-hover,transparent);border-radius:6px}
 .cv-profile-slot .cv,.cv-profile-slot .cv-controls{width:100%;height:100%;padding:0;margin:0}
@@ -55879,6 +55925,8 @@ var css = `
 .cv-drop-after{box-shadow:0 2px 0 var(--brand-500,#5865f2)!important}
 .cv-quality-dialog{width:min(360px,calc(100vw - 32px));padding:20px;border:1px solid var(--background-modifier-accent,#444);border-radius:10px;background:var(--background-floating,#232428);color:var(--text-normal,#eee)}
 .cv-quality-dialog::backdrop{background:#0009}.cv-quality-dialog label{display:flex;justify-content:space-between;align-items:center;margin:16px 0;gap:20px}.cv-quality-dialog select,.cv-share-footer select{background:var(--input-background,#1e1f22);color:var(--text-normal,#eee);border:1px solid var(--background-modifier-accent,#555);padding:6px;border-radius:4px}.cv-quality-dialog footer{display:flex;justify-content:flex-end;gap:8px}.cv-quality-dialog [role=alert]{color:var(--text-danger,#fa777c)}.cv-share-footer select{margin:8px 10px 0 0}.cv-voice-panel>.cv-share-quality{display:block;text-align:right;margin-top:4px}.cv-share-quality>button{font-size:12px;padding:4px 6px}
+
+.cv-mini-player{display:grid;gap:6px}.cv-stream-picker:empty{display:none}.cv-stream-picker{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#17181c}.cv-stream-picker button[aria-pressed=true]{background:var(--brand-500,#5865f2)}
 `;
 
 // src/components/popout-geometry.ts
@@ -56217,6 +56265,7 @@ function Screen({ identity: identity2, manager, compact: compact2 = false, detac
   const name = (self ? state.user?.username : participant && (state.profiles[participant.userId]?.username || room?.remoteParticipants.get(identity2)?.name)) || "\uD654\uBA74 \uACF5\uC720";
   const [phase, setPhase] = (0, import_react5.useState)("loading");
   const [resolution2, setResolution] = (0, import_react5.useState)("");
+  const [controlsVisible, setControlsVisible] = (0, import_react5.useState)(false);
   const [fill, setFill] = (0, import_react5.useState)(false);
   const [isFullscreen, setFullscreen] = (0, import_react5.useState)(false);
   const [volume, setVolume] = (0, import_react5.useState)(() => self ? 0 : manager.media.getStreamVolume(identity2));
@@ -56225,6 +56274,9 @@ function Screen({ identity: identity2, manager, compact: compact2 = false, detac
   const track = poppedOut ? void 0 : publication?.track;
   (0, import_react5.useEffect)(() => {
     const document2 = container.current?.ownerDocument ?? globalThis.document;
+    const win = document2.defaultView;
+    const blur = () => setControlsVisible(false);
+    win?.addEventListener("blur", blur);
     const changed = () => setFullscreen(document2.fullscreenElement === container.current);
     const keyboard = (event) => {
       if (event.key !== "Escape" || document2.fullscreenElement !== container.current || document2.querySelector("dialog[open]")) return;
@@ -56235,6 +56287,7 @@ function Screen({ identity: identity2, manager, compact: compact2 = false, detac
     document2.addEventListener("fullscreenchange", changed);
     document2.addEventListener("keydown", keyboard, true);
     return () => {
+      win?.removeEventListener("blur", blur);
       document2.removeEventListener("fullscreenchange", changed);
       document2.removeEventListener("keydown", keyboard, true);
     };
@@ -56289,7 +56342,7 @@ function Screen({ identity: identity2, manager, compact: compact2 = false, detac
   const paused = publication?.isMuted || track?.isMuted || track?.streamState === "paused";
   const message = state.connection === "Reconnecting" ? "\uBC29\uC1A1\uC5D0 \uB2E4\uC2DC \uC5F0\uACB0\uD558\uB294 \uC911\u2026" : paused ? "\uBC29\uC1A1\uC774 \uC77C\uC2DC \uC911\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : phase === "loading" ? "\uBC29\uC1A1\uC5D0 \uC5F0\uACB0\uD558\uB294 \uC911\u2026" : phase === "blocked" ? "\uBC29\uC1A1\uC744 \uC7AC\uC0DD\uD558\uB824\uBA74 \uB20C\uB7EC \uC8FC\uC138\uC694." : phase === "failed" ? "\uBC29\uC1A1\uC744 \uC7AC\uC0DD\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." : void 0;
   if (poppedOut) return /* @__PURE__ */ import_react5.default.createElement("div", { className: "cv-screen cv-popout-notice", "aria-label": `${name} \uBC29\uC1A1` }, /* @__PURE__ */ import_react5.default.createElement("p", null, "\uBCC4\uB3C4 \uD31D\uC5C5 \uCC3D\uC5D0\uC11C \uC2DC\uCCAD \uC911"), /* @__PURE__ */ import_react5.default.createElement("button", { onClick: () => openStreamPopout(manager, identity2) }, "\uD31D\uC5C5 \uCC3D \uC5F4\uAE30"), /* @__PURE__ */ import_react5.default.createElement("button", { onClick: () => returnStreamPopout(manager, identity2) }, "\uBCF8\uCC3D\uC5D0\uC11C \uBCF4\uAE30"));
-  return /* @__PURE__ */ import_react5.default.createElement("div", { ref: container, className: `cv-screen${compact2 ? " cv-screen-compact" : ""}`, "aria-label": `${name} \uBC29\uC1A1` }, /* @__PURE__ */ import_react5.default.createElement("div", { className: "cv-screen-heading" }, compact2 ? /* @__PURE__ */ import_react5.default.createElement(
+  return /* @__PURE__ */ import_react5.default.createElement("div", { ref: container, className: `cv-screen${compact2 ? " cv-screen-compact" : ""}${controlsVisible ? " cv-controls-visible" : ""}`, onPointerEnter: () => setControlsVisible(true), onPointerLeave: () => setControlsVisible(false), "aria-label": `${name} \uBC29\uC1A1` }, /* @__PURE__ */ import_react5.default.createElement("div", { className: "cv-screen-heading" }, compact2 ? /* @__PURE__ */ import_react5.default.createElement(
     "button",
     {
       className: "cv-mini-return",
@@ -56370,12 +56423,15 @@ function Screen({ identity: identity2, manager, compact: compact2 = false, detac
 }
 function MiniPlayer({ manager }) {
   (0, import_react5.useSyncExternalStore)(manager.store.subscribe, manager.store.get);
-  const identity2 = miniIdentity(manager);
-  return identity2 ? /* @__PURE__ */ import_react5.default.createElement("div", { className: "cv cv-mini-player" }, /* @__PURE__ */ import_react5.default.createElement(Screen, { identity: identity2, manager, compact: true })) : null;
+  const identities = miniIdentities(manager);
+  return identities.length ? /* @__PURE__ */ import_react5.default.createElement("div", { className: "cv cv-mini-player" }, identities.map((identity2) => /* @__PURE__ */ import_react5.default.createElement(Screen, { key: identity2, identity: identity2, manager, compact: true }))) : null;
 }
 function miniIdentity(manager) {
+  return miniIdentities(manager)[0];
+}
+function miniIdentities(manager) {
   const state = manager.store.get();
-  return [...state.watching, ...state.sharing ? [manager.client.mediaRoom?.localParticipant.identity] : []].find((identity2) => Boolean(identity2) && !state.poppedOut.includes(identity2));
+  return [...state.watching, ...state.sharing ? [manager.client.mediaRoom?.localParticipant.identity] : []].filter((identity2) => Boolean(identity2) && !state.poppedOut.includes(identity2));
 }
 
 // src/components/ui.tsx
@@ -56928,7 +56984,14 @@ function MainContent(props) {
       onClick: props.hide
     },
     /* @__PURE__ */ import_react6.default.createElement(Icon, { name: "close" })
-  )), state.error && /* @__PURE__ */ import_react6.default.createElement("p", { className: "cv-error", role: "alert" }, state.error), /* @__PURE__ */ import_react6.default.createElement(AudioDeviceStatus, { manager: props.manager }), /* @__PURE__ */ import_react6.default.createElement("div", { className: "cv-screens" }, state.watching.filter((id2) => !state.sharing || id2 !== selfIdentity).map((id2) => /* @__PURE__ */ import_react6.default.createElement(Screen, { key: id2, identity: id2, manager: props.manager })), state.sharing && selfIdentity && /* @__PURE__ */ import_react6.default.createElement(Screen, { identity: selfIdentity, manager: props.manager })), (state.watching.length > 0 || state.sharing) && /* @__PURE__ */ import_react6.default.createElement(
+  )), state.error && /* @__PURE__ */ import_react6.default.createElement("p", { className: "cv-error", role: "alert" }, state.error), /* @__PURE__ */ import_react6.default.createElement(AudioDeviceStatus, { manager: props.manager }), /* @__PURE__ */ import_react6.default.createElement("nav", { className: "cv-stream-picker", "aria-label": "\uBC29\uC1A1 \uC120\uD0DD" }, state.participants.filter((p) => p.channelId === state.sessionChannel?.id && p.screenSharing && p.userId !== state.user?.id).map((p) => {
+    const watching = state.watching.includes(p.mediaIdentity);
+    const user = identity(p, state, props.manager, props.compat);
+    return /* @__PURE__ */ import_react6.default.createElement("button", { key: p.mediaIdentity, "aria-pressed": watching, onClick: () => {
+      if (watching) props.manager.watch(p.mediaIdentity, false);
+      else run(props.manager, props.manager.watchParticipant(p));
+    } }, user.name, " \xB7 ", watching ? "\uC2DC\uCCAD \uC885\uB8CC" : "\uBC29\uC1A1 \uBCF4\uAE30");
+  })), /* @__PURE__ */ import_react6.default.createElement("div", { className: "cv-screens" }, state.watching.filter((id2) => !state.sharing || id2 !== selfIdentity).map((id2) => /* @__PURE__ */ import_react6.default.createElement(Screen, { key: id2, identity: id2, manager: props.manager })), state.sharing && selfIdentity && /* @__PURE__ */ import_react6.default.createElement(Screen, { identity: selfIdentity, manager: props.manager })), (state.watching.length > 0 || state.sharing) && /* @__PURE__ */ import_react6.default.createElement(
     "button",
     {
       className: "cv-view-participants",
